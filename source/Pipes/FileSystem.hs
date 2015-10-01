@@ -1,6 +1,11 @@
+{-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE RecordWildCards #-}
+
 module Pipes.FileSystem where
 
 import Control.Applicative ((<|>))
+import Control.Monad
+    ( when )
 import System.Directory
     ( doesDirectoryExist
     , doesFileExist )
@@ -19,8 +24,29 @@ import qualified Pipes.Safe             as PS
 import qualified System.Directory       as D
 import qualified System.Posix.Directory as PD
 
--- Example:
---
+delete :: FilePath -> IO ()
+delete path =
+    readFileType path >>= \case
+        Just Directory -> D.removeDirectory path
+        Just File -> D.removeFile path
+        Nothing -> pure ()
+
+deleteRecursively :: FilePath -> IO ()
+deleteRecursively path =
+    PS.runSafeT $ P.runEffect $ objectsToDelete >-> P.mapM_ (liftIO . delete) where
+        objectsToDelete = P.enumerate $
+            descendants TraversalArgs {traversalOrder = LeafToRoot} path
+
+readFileType :: FilePath -> IO (Maybe FileType)
+readFileType p =
+    ifM (D.doesDirectoryExist p) (pure $ Just Directory) $
+    ifM (D.doesFileExist p) (pure $ Just File) (pure Nothing)
+
+data FileType = File | Directory deriving Show
+
+data TraversalArgs = TraversalArgs
+    { traversalOrder :: TraversalOrder }
+
 --  r
 --  ├── a
 --  │   ├── f
@@ -34,57 +60,42 @@ import qualified System.Posix.Directory as PD
 --  leaf-to-root order:  [r, ra, raf, rag, rb, rbf, rbg, rf, rg]
 --  root-to-leaf order:  [raf, rag, ra, rbf, rbg, rb, rf, rg, r]
 
-data FileType = File | Directory deriving Show
+data TraversalOrder = RootToLeaf | LeafToRoot
 
-isDirectory :: FileInfo -> Bool
-isDirectory (FileInfo Directory _) = True
-isDirectory _ = False
-
-filePath :: FileInfo -> FilePath
-filePath (FileInfo _ path) = path
-
-data FileInfo = FileInfo FileType FilePath deriving Show
-
-data TraverseOrder = RootToLeaf | LeafToRoot
-
-isCurrentDirectory = (==) "."
-isParentDirectory = (==) ".."
-
-isCurrentOrParentDirectory p =
-    isCurrentDirectory p ||
-    isParentDirectory p
-
-readFileInfo :: PS.MonadSafe m => FilePath -> m FileInfo
-readFileInfo f = do
-    isDirectory <- liftIO $ D.doesDirectoryExist f
-    return $ FileInfo (if isDirectory then Directory else File) f
-
-children :: PS.MonadSafe m => FilePath -> P.ListT m FileInfo
+children :: PS.MonadSafe m => FilePath -> P.ListT m FilePath
 children path = P.Select $ do
     canRead <- liftIO $ D.readable <$> D.getPermissions path
-    M.when canRead $ PS.bracket before after loop
+    M.when canRead $ PS.bracket openStream closeStream readStream
         >-> P.filter (not . isCurrentOrParentDirectory)
         >-> P.map (path </>)
-        >-> P.mapM readFileInfo
     where
-        before = liftIO $ PD.openDirStream path
-        after = liftIO . PD.closeDirStream
-        loop stream = do
-            file <- liftIO $ PD.readDirStream stream
-            M.unless (null file) $ yield file >> loop stream
+        openStream = liftIO $ PD.openDirStream path
+        closeStream = liftIO . PD.closeDirStream
+        readStream stream = do
+            p <- liftIO $ PD.readDirStream stream
+            M.unless (null p) $ yield p >> readStream stream
 
--- Surely this should also return the supplied path.
-descendants :: PS.MonadSafe m => TraverseOrder -> FilePath -> P.ListT m FileInfo
-descendants RootToLeaf path = do
-    child <- children path
-    if isDirectory child
-        then pure child <|> descendants RootToLeaf (filePath child)
-        else pure child
-descendants LeafToRoot path = do
-    child <- children path
-    if isDirectory child
-        then descendants RootToLeaf (filePath child) <|> pure child
-        else pure child
+descendants :: PS.MonadSafe m =>
+    TraversalArgs -> FilePath -> P.ListT m FilePath
+descendants TraversalArgs {..} path =
+    liftIO (readFileType path) >>= \case
+        Nothing   -> P.mzero
+        Just File -> pure path
+        Just Directory ->
+            case traversalOrder of
+                RootToLeaf -> pure path <|> ds
+                LeafToRoot -> ds <|> pure path
+    where ds = children path >>= descendants TraversalArgs {..}
+
+isCurrentDirectory :: FilePath -> Bool
+isCurrentDirectory = (==) "."
+
+isParentDirectory :: FilePath -> Bool
+isParentDirectory = (==) ".."
+
+isCurrentOrParentDirectory :: FilePath -> Bool
+isCurrentOrParentDirectory p =
+    isCurrentDirectory p || isParentDirectory p
 
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM p t f = p >>= bool f t
