@@ -1,5 +1,4 @@
 {-# LANGUAGE LambdaCase #-}
-{-# LANGUAGE RecordWildCards #-}
 
 module Pipes.FileSystem where
 
@@ -35,7 +34,7 @@ deleteRecursively :: FilePath -> IO ()
 deleteRecursively path =
     PS.runSafeT $ P.runEffect $ objectsToDelete >-> P.mapM_ (liftIO . delete) where
         objectsToDelete = P.enumerate $
-            descendants TraversalArgs {traversalOrder = LeafToRoot} path
+            descendants LeafToRoot path
 
 readFileType :: FilePath -> IO (Maybe FileType)
 readFileType p =
@@ -76,16 +75,24 @@ children path = P.Select $ do
             M.unless (null p) $ yield p >> readStream stream
 
 descendants :: PS.MonadSafe m =>
-    TraversalArgs -> FilePath -> P.ListT m FilePath
-descendants TraversalArgs {..} path =
+    TraversalOrder -> FilePath -> P.ListT m FilePath
+descendants order path =
     liftIO (readFileType path) >>= \case
         Nothing   -> P.mzero
         Just File -> pure path
         Just Directory ->
-            case traversalOrder of
+            case order of
                 RootToLeaf -> pure path <|> ds
                 LeafToRoot -> ds <|> pure path
-    where ds = children path >>= descendants TraversalArgs {..}
+    where ds = children path >>= descendants order
+
+onlyDirectories :: P.MonadIO m => P.Pipe FilePath FilePath m r
+onlyDirectories = M.forever $ P.await >>= \p ->
+    whenM (liftIO $ D.doesDirectoryExist p) (P.yield p)
+
+onlyFiles :: P.MonadIO m => P.Pipe FilePath FilePath m r
+onlyFiles = M.forever $ P.await >>= \p ->
+    whenM (liftIO $ D.doesFileExist p) (P.yield p)
 
 isCurrentDirectory :: FilePath -> Bool
 isCurrentDirectory = (==) "."
