@@ -1,34 +1,35 @@
 {-# LANGUAGE LambdaCase #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 module Pipes.FileSystem where
 
-import Control.Applicative ((<|>))
-import Control.Monad
-    ( when )
-import System.Directory
-    ( doesDirectoryExist
-    , doesFileExist )
-import System.FilePath.Posix ((</>))
-import Pipes
-    ( (>->)
-    , lift
-    , liftIO
-    , yield )
+import Control.Applicative                  ( (<|>) )
+import Control.Monad                        ( when )
+import Data.Monoid                          ( (<>) )
+import Prelude                       hiding ( FilePath )
+import System.Posix.ByteString              ( RawFilePath )
+import System.Posix.Files.ByteString        ( getFileStatus )
+import Pipes                                ( (>->)
+                                            , liftIO
+                                            , yield )
 
-import qualified Control.Monad          as M
+import qualified Control.Monad                      as M
+import qualified Data.ByteString                    as B
+import qualified Pipes                              as P
+import qualified Pipes.Prelude                      as P
+import qualified Pipes.Safe                         as PS
+import qualified System.Directory                   as D
+import qualified System.Posix.Directory.ByteString  as PD
+import qualified System.Posix.Files.ByteString      as PF
 
-import qualified Pipes                  as P
-import qualified Pipes.Prelude          as P
-import qualified Pipes.Safe             as PS
-import qualified System.Directory       as D
-import qualified System.Posix.Directory as PD
+type FilePath = RawFilePath
 
+-- TODO: Fix race condition here.
 delete :: FilePath -> IO ()
-delete path =
-    readFileType path >>= \case
-        Just Directory -> D.removeDirectory path
-        Just File -> D.removeFile path
-        Nothing -> pure ()
+delete path = readFileType path >>= \case
+    Just Directory -> PD.removeDirectory path
+    Just File -> PF.removeLink path
+    Nothing -> pure ()
 
 deleteRecursively :: FilePath -> IO ()
 deleteRecursively path =
@@ -37,9 +38,21 @@ deleteRecursively path =
             descendants LeafToRoot path
 
 readFileType :: FilePath -> IO (Maybe FileType)
-readFileType p =
-    ifM (D.doesDirectoryExist p) (pure $ Just Directory) $
-    ifM (D.doesFileExist p) (pure $ Just File) (pure Nothing)
+readFileType p = do
+    s <- getFileStatus p
+    pure $
+        if PF.isDirectory   s then Just Directory else
+        if PF.isRegularFile s then Just File      else Nothing
+
+doesDirectoryExist :: FilePath -> IO Bool
+doesDirectoryExist p = readFileType p >>= \case
+    Just Directory -> pure True
+    _ -> pure False
+
+doesFileExist :: FilePath -> IO Bool
+doesFileExist p = readFileType p >>= \case
+    Just File -> pure True
+    _ -> pure False
 
 data FileType = File | Directory deriving Show
 
@@ -61,38 +74,48 @@ data TraversalArgs = TraversalArgs
 
 data TraversalOrder = RootToLeaf | LeafToRoot
 
+-- TODO: reinstate check here
+canReadDir :: FilePath -> IO Bool
+canReadDir path = pure True
+    -- D.readable <$> D.getPermissions path
+
 children :: PS.MonadSafe m => FilePath -> P.ListT m FilePath
 children path = P.Select $ do
-    canRead <- liftIO $ D.readable <$> D.getPermissions path
+    let pathWithTail = path <> "/"
+    canRead <- liftIO $ canReadDir path
     M.when canRead $ PS.bracket openStream closeStream readStream
         >-> P.filter (not . isCurrentOrParentDirectory)
-        >-> P.map (path </>)
+        >-> P.map (pathWithTail <>)
     where
         openStream = liftIO $ PD.openDirStream path
         closeStream = liftIO . PD.closeDirStream
         readStream stream = do
             p <- liftIO $ PD.readDirStream stream
-            M.unless (null p) $ yield p >> readStream stream
+            M.unless (B.null p) $ yield p >> readStream stream
 
 descendants :: PS.MonadSafe m =>
     TraversalOrder -> FilePath -> P.ListT m FilePath
-descendants order path =
+descendants LeafToRoot = descendantsLeafToRoot
+descendants RootToLeaf = descendantsRootToLeaf
+
+descendantsLeafToRoot path =
     liftIO (readFileType path) >>= \case
-        Nothing   -> P.mzero
+        Just Directory -> ds <|> pure path
         Just File -> pure path
-        Just Directory ->
-            case order of
-                RootToLeaf -> pure path <|> ds
-                LeafToRoot -> ds <|> pure path
-    where ds = children path >>= descendants order
+        _   -> P.mzero
+    where ds = children path >>= descendantsLeafToRoot
+descendantsRootToLeaf path =
+    liftIO (readFileType path) >>= \case
+        Just Directory -> pure path <|> ds
+        Just File -> pure path
+        _   -> P.mzero
+    where ds = children path >>= descendantsRootToLeaf
 
 onlyDirectories :: P.MonadIO m => P.Pipe FilePath FilePath m r
-onlyDirectories = M.forever $ P.await >>= \p ->
-    whenM (liftIO $ D.doesDirectoryExist p) (P.yield p)
+onlyDirectories = P.filterM (liftIO . doesDirectoryExist)
 
 onlyFiles :: P.MonadIO m => P.Pipe FilePath FilePath m r
-onlyFiles = M.forever $ P.await >>= \p ->
-    whenM (liftIO $ D.doesFileExist p) (P.yield p)
+onlyFiles = P.filterM (liftIO . doesFileExist)
 
 isCurrentDirectory :: FilePath -> Bool
 isCurrentDirectory = (==) "."
