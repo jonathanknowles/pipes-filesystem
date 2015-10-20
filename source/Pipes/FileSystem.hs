@@ -57,9 +57,6 @@ doesFileExist p = readFileType p >>= \case
 
 data FileType = File | Directory deriving Show
 
-data TraversalArgs = TraversalArgs
-    { traversalOrder :: TraversalOrder }
-
 --  r
 --  ├── a
 --  │   ├── f
