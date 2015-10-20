@@ -34,10 +34,16 @@ delete path = readFileType path >>= \case
     Nothing -> pure ()
 
 deleteRecursively :: FilePath -> IO ()
-deleteRecursively path =
-    PS.runSafeT $ P.runEffect $ objectsToDelete >-> P.mapM_ (liftIO . delete) where
-        objectsToDelete = P.enumerate $
-            descendants LeafToRoot path
+deleteRecursively path = undefined
+    --PS.runSafeT $ P.runEffect $ objectsToDelete >-> P.mapM_ (liftIO . delete) where
+    --    objectsToDelete = P.enumerate $
+    --        descendants LeafToRoot path
+
+fileType :: FileStatus -> FileType
+fileType s
+    | PF.isDirectory   s = Directory
+    | PF.isRegularFile s = File
+    | otherwise          = Unknown
 
 readFileType :: FilePath -> IO (Maybe FileType)
 readFileType p = do
@@ -45,6 +51,12 @@ readFileType p = do
     pure $
         if PF.isDirectory   s then Just Directory else
         if PF.isRegularFile s then Just File      else Nothing
+
+isDirectory :: FileInfo -> Bool
+isDirectory = PF.isDirectory . fileStatus
+
+isFile :: FileInfo -> Bool
+isFile = PF.isRegularFile . fileStatus
 
 doesDirectoryExist :: FilePath -> IO Bool
 doesDirectoryExist p = readFileType p >>= \case
@@ -56,7 +68,7 @@ doesFileExist p = readFileType p >>= \case
     Just File -> pure True
     _ -> pure False
 
-data FileType = File | Directory deriving Show
+data FileType = File | Directory | Unknown deriving Show
 
 --  r
 --  ├── a
@@ -96,25 +108,17 @@ children path = P.Select $ do
             p <- liftIO $ PD.readDirStream stream
             M.unless (B.null p) $ yield p >> read stream
 
-descendants :: PS.MonadSafe m => TraversalOrder -> FilePath -> P.ListT m FilePath
+descendants :: PS.MonadSafe m => TraversalOrder -> FilePath -> P.ListT m FileInfo
 descendants = \case
         RootToLeaf -> rtl
         LeafToRoot -> ltr
     where
-        ltr p = liftIO (readFileType p) >>= \case
-            Just Directory -> (children p >>= ltr) <|> pure p
-            Just File      -> pure p
-            Nothing        -> mempty
-        rtl p = liftIO (readFileType p) >>= \case
-            Just Directory -> pure p <|> (children p >>= rtl)
-            Just File      -> pure p
-            Nothing        -> mempty
-
-onlyDirectories :: P.MonadIO m => P.Pipe FilePath FilePath m r
-onlyDirectories = P.filterM (liftIO . doesDirectoryExist)
-
-onlyFiles :: P.MonadIO m => P.Pipe FilePath FilePath m r
-onlyFiles = P.filterM (liftIO . doesFileExist)
+        ltr p = liftIO (getFileStatus p) >>= \s -> case fileType s of
+            Directory -> (children p >>= ltr) <|> pure (FileInfo p s)
+            _         ->                          pure (FileInfo p s)
+        rtl p = liftIO (getFileStatus p) >>= \s -> case fileType s of
+            Directory -> pure (FileInfo p s) <|> (children p >>= rtl)
+            _         -> pure (FileInfo p s)
 
 isCurrentDirectory :: FilePath -> Bool
 isCurrentDirectory = (==) "."
