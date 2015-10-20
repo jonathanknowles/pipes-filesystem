@@ -5,7 +5,8 @@ module Pipes.FileSystem where
 
 import Control.Applicative                  ( (<|>) )
 import Control.Monad                        ( when )
-import Data.Monoid                          ( (<>) )
+import Data.Monoid                          ( (<>)
+                                            , mempty )
 import Prelude                       hiding ( FilePath )
 import System.Posix.ByteString              ( RawFilePath )
 import System.Posix.Files.ByteString        ( FileStatus
@@ -100,14 +101,14 @@ descendants = \case
         RootToLeaf -> rtl
         LeafToRoot -> ltr
     where
-        ltr path = liftIO (readFileType path) >>= \case
-            Just Directory -> (children path >>= ltr) <|> pure path
-            Just File      -> pure path
-            Nothing        -> P.mzero
-        rtl path = liftIO (readFileType path) >>= \case
-            Just Directory -> pure path <|> (children path >>= rtl)
-            Just File      -> pure path
-            Nothing        -> P.mzero
+        ltr p = liftIO (readFileType p) >>= \case
+            Just Directory -> (children p >>= ltr) <|> pure p
+            Just File      -> pure p
+            Nothing        -> mempty
+        rtl p = liftIO (readFileType p) >>= \case
+            Just Directory -> pure p <|> (children p >>= rtl)
+            Just File      -> pure p
+            Nothing        -> mempty
 
 onlyDirectories :: P.MonadIO m => P.Pipe FilePath FilePath m r
 onlyDirectories = P.filterM (liftIO . doesDirectoryExist)
