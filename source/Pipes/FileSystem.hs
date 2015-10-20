@@ -83,33 +83,29 @@ children :: PS.MonadSafe m => FilePath -> P.ListT m FilePath
 children path = P.Select $ do
     let pathWithTail = path <> "/"
     canRead <- liftIO $ canReadDir path
-    M.when canRead $ PS.bracket openStream closeStream readStream
+    M.when canRead $ PS.bracket open close read
         >-> P.filter (not . isCurrentOrParentDirectory)
         >-> P.map (pathWithTail <>)
     where
-        openStream = liftIO $ PD.openDirStream path
-        closeStream = liftIO . PD.closeDirStream
-        readStream stream = do
+        open = liftIO $ PD.openDirStream path
+        close = liftIO . PD.closeDirStream
+        read stream = do
             p <- liftIO $ PD.readDirStream stream
-            M.unless (B.null p) $ yield p >> readStream stream
+            M.unless (B.null p) $ yield p >> read stream
 
-descendants :: PS.MonadSafe m =>
-    TraversalOrder -> FilePath -> P.ListT m FilePath
-descendants LeafToRoot = descendantsLeafToRoot
-descendants RootToLeaf = descendantsRootToLeaf
-
-descendantsLeafToRoot path =
-    liftIO (readFileType path) >>= \case
-        Just Directory -> ds <|> pure path
-        Just File -> pure path
-        _   -> P.mzero
-    where ds = children path >>= descendantsLeafToRoot
-descendantsRootToLeaf path =
-    liftIO (readFileType path) >>= \case
-        Just Directory -> pure path <|> ds
-        Just File -> pure path
-        _   -> P.mzero
-    where ds = children path >>= descendantsRootToLeaf
+descendants :: PS.MonadSafe m => TraversalOrder -> FilePath -> P.ListT m FilePath
+descendants = \case
+        RootToLeaf -> rtl
+        LeafToRoot -> ltr
+    where
+        ltr path = liftIO (readFileType path) >>= \case
+            Just Directory -> (children path >>= ltr) <|> pure path
+            Just File      -> pure path
+            Nothing        -> P.mzero
+        rtl path = liftIO (readFileType path) >>= \case
+            Just Directory -> pure path <|> (children path >>= rtl)
+            Just File      -> pure path
+            Nothing        -> P.mzero
 
 onlyDirectories :: P.MonadIO m => P.Pipe FilePath FilePath m r
 onlyDirectories = P.filterM (liftIO . doesDirectoryExist)
