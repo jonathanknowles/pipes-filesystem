@@ -8,7 +8,8 @@ import Control.Monad                        ( when )
 import Data.Monoid                          ( (<>) )
 import Prelude                       hiding ( FilePath )
 import System.Posix.ByteString              ( RawFilePath )
-import System.Posix.Files.ByteString        ( getFileStatus )
+import System.Posix.Files.ByteString        ( FileStatus
+                                            , getFileStatus )
 import Pipes                                ( (>->)
                                             , liftIO
                                             , yield )
@@ -73,6 +74,10 @@ data TraversalArgs = TraversalArgs
 --  root-to-leaf order:  [raf, rag, ra, rbf, rbg, rb, rf, rg, r]
 
 data TraversalOrder = RootToLeaf | LeafToRoot
+
+data FileInfo = FileInfo
+    { filePath   :: !FilePath
+    , fileStatus :: !FileStatus }
 
 -- TODO: reinstate check here
 canReadDir :: FilePath -> IO Bool
