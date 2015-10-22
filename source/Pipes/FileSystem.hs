@@ -4,7 +4,8 @@
 module Pipes.FileSystem where
 
 import Control.Applicative                  ( (<|>) )
-import Control.Monad                        ( when )
+import Control.Monad                        ( (>=>)
+                                            , when )
 import Data.Monoid                          ( (<>)
                                             , mempty )
 import Prelude                       hiding ( FilePath )
@@ -94,13 +95,21 @@ canReadDir :: FilePath -> IO Bool
 canReadDir path = pure True
     -- D.readable <$> D.getPermissions path
 
-children :: PS.MonadSafe m => FilePath -> P.ListT m FilePath
+getFileInfo :: P.MonadIO m => FilePath -> m FileInfo
+getFileInfo path = do
+    status <- liftIO $ getFileStatus path
+    pure $ FileInfo path status
+
+children :: PS.MonadSafe m
+    => FilePath
+    -> P.ListT m FileInfo
 children path = P.Select $ do
-    let pathWithTail = path <> "/"
+    let addPathPrefix t = path <> "/" <> t
     canRead <- liftIO $ canReadDir path
     M.when canRead $ PS.bracket open close read
         >-> P.filter (not . isCurrentOrParentDirectory)
-        >-> P.map (pathWithTail <>)
+        >-> P.map addPathPrefix
+        >-> P.mapM getFileInfo
     where
         open = liftIO $ PD.openDirStream path
         close = liftIO . PD.closeDirStream
@@ -108,17 +117,22 @@ children path = P.Select $ do
             p <- liftIO $ PD.readDirStream stream
             M.unless (B.null p) $ yield p >> read stream
 
-descendants :: PS.MonadSafe m => TraversalOrder -> FilePath -> P.ListT m FileInfo
+descendants :: PS.MonadSafe m
+    => TraversalOrder
+    -> FilePath
+    -> P.ListT m FileInfo
 descendants = \case
         RootToLeaf -> rtl
         LeafToRoot -> ltr
     where
-        ltr p = liftIO (getFileStatus p) >>= \s -> case fileType s of
-            Directory -> (children p >>= ltr) <|> pure (FileInfo p s)
-            _         ->                          pure (FileInfo p s)
-        rtl p = liftIO (getFileStatus p) >>= \s -> case fileType s of
-            Directory -> pure (FileInfo p s) <|> (children p >>= rtl)
-            _         -> pure (FileInfo p s)
+    rtl = children >=> \c ->
+        if      isFile      c then pure c
+        else if isDirectory c then pure c <|> rtl (filePath c)
+        else                       mempty
+    ltr = children >=> \c ->
+        if      isFile      c then                      pure c
+        else if isDirectory c then ltr (filePath c) <|> pure c
+        else                                            mempty
 
 isCurrentDirectory :: FilePath -> Bool
 isCurrentDirectory = (==) "."

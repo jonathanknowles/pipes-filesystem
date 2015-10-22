@@ -27,3 +27,10 @@ library
         unix
     hs-source-dirs:
         source
+    ghc-options:
+        -O3
+        -threaded
+        -rtsopts
+        -fprof-auto
+        -with-rtsopts=-N
+
