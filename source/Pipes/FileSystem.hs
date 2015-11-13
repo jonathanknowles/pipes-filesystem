@@ -17,7 +17,10 @@ import Pipes
     , (<-<)
     , liftIO
     , yield
+    , Pipe
     , Producer )
+import Pipes.Combinators
+    ( filterMap )
 import Pipes.Safe
     ( MonadSafe )
 
@@ -92,12 +95,11 @@ data TraversalOrder
 --  root-to-leaf order:  [raf, rag, ra, rbf, rbg, rb, rf, rg, r]
 
 children :: MonadSafe m
-    => FilePath
-    -> Producer FileInfo m ()
+    => FilePath -> Producer FileInfo m ()
 children path = PS.bracket open close read where
     addPrefix p = path <> "/" <> p
     open = liftIO $ S.openDirStream path
-    close stream = liftIO $ S.closeDirStream stream
+    close = liftIO . S.closeDirStream
     read stream = do
         (t, p) <- liftIO $ S.readDirStream' stream
         M.unless (B.null p) $ do
@@ -107,9 +109,7 @@ children path = PS.bracket open close read where
 {-# INLINE children #-}
 
 descendants :: MonadSafe m
-    => TraversalOrder
-    -> FilePath
-    -> Producer FileInfo m ()
+    => TraversalOrder -> FilePath -> Producer FileInfo m ()
 descendants = \case
         RootToLeaf -> P.enumerate . rtl
         LeafToRoot -> P.enumerate . ltr
@@ -123,12 +123,19 @@ descendants = \case
         else if isDirectory c then ltr (filePath c) <|> pure c
         else                                            mempty
 
+directories :: Monad m => Pipe FileInfo FilePath m r
+directories = filterMap isDirectory filePath
+
+files :: Monad m => Pipe FileInfo FilePath m r
+files = filterMap isFile filePath
+
+descendantDirectories :: MonadSafe m
+    => TraversalOrder -> FilePath -> Producer FilePath m ()
+descendantDirectories = ((directories <-<) .) . descendants
+
 descendantFiles :: MonadSafe m
-    => TraversalOrder
-    -> FilePath
-    -> Producer FileInfo m ()
-descendantFiles order path =
-    P.filter isFile <-< descendants order path
+    => TraversalOrder -> FilePath -> Producer FilePath m ()
+descendantFiles = ((files <-<) .) . descendants
 
 currentDirectory :: FilePath
 currentDirectory = "."
