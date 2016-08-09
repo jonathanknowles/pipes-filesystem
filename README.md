@@ -24,6 +24,6 @@ Currently there isn't support for Windows or other UNIX-like operating systems, 
 Building
 --------
 
-Requires a patched version of the [Haskell Unix package](https://github.com/jonathanknowles/unix/), which provides Linux-specific file system functions.
+Requires a [patched version](https://github.com/jonathanknowles/unix/) of the [Haskell Unix package](https://github.com/haskell/unix/), which provides Linux-specific file system functions.
 
 This may change in future.
