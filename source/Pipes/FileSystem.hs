@@ -8,7 +8,20 @@
     Portability : Linux
 -}
 
-module Pipes.FileSystem where
+module Pipes.FileSystem
+    ( FileInfo (..)
+    , FilePath
+    , FileType (..)
+    , TraversalOrder (..)
+    , children
+    , descendants
+    , descendantFiles
+    , descendantDirectories
+    , directories
+    , files
+    , isDirectory
+    , isFile
+    ) where
 
 import Control.Applicative ( (<|>) )
 import Control.Monad ( (>=>) )
@@ -17,7 +30,7 @@ import Data.Word ( Word32 )
 import Pipes ( (>->), (<-<), liftIO, yield, Pipe, Producer )
 import Pipes.Combinators ( filterMap )
 import Pipes.Safe ( MonadSafe )
-import System.Linux.Directory.ByteString ( DirEntryType (..) )
+import System.Linux.Directory.ByteString ( FileType (..) )
 
 import Prelude hiding ( FilePath )
 
@@ -37,7 +50,6 @@ data FileInfo = FileInfo
     , fileType :: !FileType }
 
 type FilePath = S.RawFilePath
-type FileType = S.DirEntryType
 
 {-| Specifies in which order to traverse a directory tree.
     Given the following tree:
