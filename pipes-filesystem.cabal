@@ -10,15 +10,14 @@ cabal-version:  >=1.10
 synopsis:       Provides functions for efficiently streaming over directory trees. (Compatible with Haskell Pipes).
 
 library
-    default-language:   Haskell2010
+    default-language:
+        Haskell2010
     exposed-modules:
         Pipes.Combinators
         Pipes.FileSystem
     build-depends:
         base       >= 4.8      && < 5.0,
         bytestring >= 0.10.6.0 && < 1.0,
-        directory  >= 1.2.2.0  && < 2.0,
-        filepath   >= 1.4.0.0  && < 2.0,
         pipes      >= 4.1.9    && < 5.0,
         pipes-safe >= 2.2.4    && < 3.0,
         unix       == 2.7.2.0
