@@ -1,0 +1,10 @@
+resolver: lts-6.10
+packages:
+  - '.'
+  - location:
+        git: git@github.com:/jonathanknowles/unix
+        commit: 119bbbe27f59bd0ef767fc3f93dd0aba5f70dbcc
+extra-package-dbs: []
+extra-deps: []
+flags: {}
+
