@@ -27,6 +27,13 @@ Currently this library only supports Linux. Support for other operating systems 
 Building
 --------
 
-Requires a [patched version](https://github.com/jonathanknowles/unix/) of the [Haskell Unix package](https://github.com/haskell/unix/), which provides Linux-specific file system functions.
+```
+stack build
+```
+
+Notes
+-----
+
+This package depends upon a [patched version](https://github.com/jonathanknowles/unix/) of the [Haskell Unix package](https://github.com/haskell/unix/), which provides Linux-specific file system functions.
 
 This may change in future.
